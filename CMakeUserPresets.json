@@ -1,0 +1,19 @@
+{
+  "version": 2,
+  "configurePresets": [
+    {
+      "name": "windows",
+      "inherits": "vcpkg",
+      "environment": {
+        "VCPKG_ROOT": "C:/Users/Annas/vcpkg"
+      }
+    },
+    {
+      "name": "linux",
+      "inherits": "vcpkg",
+      "environment": {
+        "VCPKG_ROOT": "~/vcpkg"
+      }
+    }
+  ]
+}

@@ -1,0 +1,10 @@
+/out
+/build
+/.vs
+/vcpkg_installed
+MiniVoice/build
+MiniVoiceTest/build
+/cmake-build-debug
+/.idea
+/build_windows
+/build_linux
