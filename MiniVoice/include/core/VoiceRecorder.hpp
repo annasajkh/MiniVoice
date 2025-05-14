@@ -28,6 +28,8 @@ namespace core
 
 		std::optional<std::shared_ptr<float[]>> dequeueSamples() const;
 
+		~VoiceRecorder();
+
 	private:
 		bool alreadyInitialized = false;
 		bool isRecording = false;

@@ -4,6 +4,9 @@
 #include <ranges>
 #include <utility>
 #include <cstring>
+#include <thread>
+
+#include "utils/Helper.hpp"
 
 namespace core
 {
@@ -11,6 +14,13 @@ namespace core
     {
         audioDevicesMapping = std::make_shared<std::map<std::string, ma_device_id>>();
         samplesList = std::make_shared<std::queue<std::shared_ptr<float[]>>>();
+
+        context = std::make_shared<ma_context>();
+
+        ma_result contextResult = ma_context_init(nullptr, 0, nullptr, context.get());
+        if (contextResult != MA_SUCCESS) {
+            throw std::runtime_error("Failed to initialize context. Error: " + utils::maResultToString(contextResult));
+        }
 
         init(sampleRate, channels, frameSizeMS, std::nullopt);
     }
@@ -35,18 +45,8 @@ namespace core
     {
         if (alreadyInitialized)
         {
-            ma_context_uninit(context.get());
             ma_device_stop(device.get());
             ma_device_uninit(device.get());
-        }
-
-        context = std::make_shared<ma_context>();
-
-        ma_result contextInitResult = ma_context_init(nullptr, 0, nullptr, context.get());
-
-        if (contextInitResult != MA_SUCCESS)
-        {
-            throw std::runtime_error("Failed to initialize context");
         }
 
         ma_device_config deviceConfig = ma_device_config_init(ma_device_type_capture);
@@ -70,6 +70,7 @@ namespace core
 
         deviceConfig.capture.format = ma_format_f32;
         deviceConfig.capture.channels = channels;
+        deviceConfig.capture.shareMode = ma_share_mode_shared;
         deviceConfig.sampleRate = sampleRate;
         deviceConfig.periodSizeInMilliseconds = frameSizeMS;
         deviceConfig.dataCallback = &staticReadSamples;
@@ -86,7 +87,7 @@ namespace core
 
         if (deviceInitResult != MA_SUCCESS)
         {
-            throw std::runtime_error("Failed to initialize capture device");
+            throw std::runtime_error("Failed to initialize capture device. Error: " + utils::maResultToString(deviceInitResult));
         }
 
         if (alreadyInitialized && isRecording)
@@ -95,7 +96,7 @@ namespace core
 
             if (deviceStartResult != MA_SUCCESS)
             {
-                throw std::runtime_error("Failed to start device");
+                throw std::runtime_error("Failed to start device. Error: " + utils::maResultToString(deviceStartResult));
             }
         }
 
@@ -131,14 +132,14 @@ namespace core
 
         if (deviceGetNameResultFirst != MA_SUCCESS)
         {
-            throw std::runtime_error("Cannot get device name");
+            throw std::runtime_error("Cannot get device name. Error: " + utils::maResultToString(deviceGetNameResultFirst));
         }
 
         ma_result deviceGetNameResultSecond = ma_device_get_name(device.get(), ma_device_type_capture, deviceName.get(), nameLength + 1, nullptr);
 
         if (deviceGetNameResultSecond != MA_SUCCESS)
         {
-            throw std::runtime_error("Cannot get device name");
+            throw std::runtime_error("Cannot get device name. Error: " + utils::maResultToString(deviceGetNameResultSecond));
         }
 
         return { deviceName.get() };
@@ -157,7 +158,7 @@ namespace core
 
         if (deviceStartResult != MA_SUCCESS)
         {
-            throw std::runtime_error("Failed to start device");
+            throw std::runtime_error("Failed to start device. Error: " + utils::maResultToString(deviceStartResult));
         }
     }
 
@@ -198,12 +199,24 @@ namespace core
 
         if (contextGetDevicesResult != MA_SUCCESS)
         {
-            throw std::runtime_error("Failed to call ma_context_get_devices()");
+            throw std::runtime_error("Failed to call ma_context_get_devices(). Error: " + utils::maResultToString(contextGetDevicesResult));
         }
 
         for (int i = 0; i < captureCount; i++)
         {
             audioDevicesMapping->insert({ captureInfos[i].name, captureInfos[i].id });
+        }
+    }
+
+    VoiceRecorder::~VoiceRecorder()
+    {
+        if (device) {
+            ma_device_stop(device.get());
+            ma_device_uninit(device.get());
+        }
+
+        if (context) {
+            ma_context_uninit(context.get());
         }
     }
 }

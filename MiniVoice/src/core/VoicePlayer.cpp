@@ -2,6 +2,7 @@
 #include "utils/Helper.hpp"
 #include <cstring>
 #include <ranges>
+#include <thread>
 
 #include "core/VoiceSource.hpp"
 
@@ -10,8 +11,14 @@ namespace core
     VoicePlayer::VoicePlayer(float volume, int sampleRate, int channels, int frameSizeMS) : VoiceBase(volume, sampleRate, channels, frameSizeMS)
     {
         voiceSources = std::make_shared<std::map<int, std::shared_ptr<VoiceSource>>>();
+        mixedSamples = std::make_shared<float[]>(4096 * channels);
 
-        mixedSamples = std::make_shared<float[]>(utils::getTotalBytes(sampleRate, frameSizeMS, channels, bytesPerSample) / sizeof(float));
+        context = std::make_shared<ma_context>();
+
+        ma_result contextResult = ma_context_init(nullptr, 0, nullptr, context.get());
+        if (contextResult != MA_SUCCESS) {
+            throw std::runtime_error("Failed to initialize context. Error: " + utils::maResultToString(contextResult));
+        }
 
         init(sampleRate, channels, frameSizeMS, std::nullopt);
     }
@@ -20,7 +27,7 @@ namespace core
     {
         VoicePlayer* currentVoicePlayer = static_cast<VoicePlayer*>(pDevice->pUserData);
 
-        int totalSamplesBytes = utils::getTotalBytes(currentVoicePlayer->sampleRate , currentVoicePlayer->frameSizeMS, currentVoicePlayer->channels, currentVoicePlayer->bytesPerSample);
+        const size_t frameBytes = frameCount * currentVoicePlayer->channels * sizeof(float);
 
         for (const std::pair<int, std::shared_ptr<VoiceSource>> voiceSource : *currentVoicePlayer->voiceSources)
         {
@@ -31,30 +38,20 @@ namespace core
                 continue;
             }
 
-            ma_mix_pcm_frames_f32(currentVoicePlayer->mixedSamples.get(), voiceSourceSamples.value().get(), totalSamplesBytes / sizeof(float) / currentVoicePlayer->channels, currentVoicePlayer->channels, currentVoicePlayer->volume);
+            ma_mix_pcm_frames_f32(currentVoicePlayer->mixedSamples.get(), voiceSourceSamples.value().get(), frameBytes / sizeof(float) / currentVoicePlayer->channels, currentVoicePlayer->channels, currentVoicePlayer->volume);
         }
 
-        memcpy(pOutput, currentVoicePlayer->mixedSamples.get(), totalSamplesBytes);
+        memcpy(pOutput, currentVoicePlayer->mixedSamples.get(), frameBytes);
 
-        memset(currentVoicePlayer->mixedSamples.get(), 0, totalSamplesBytes);
+        memset(currentVoicePlayer->mixedSamples.get(), 0, frameBytes);
     }
 
     void VoicePlayer::init(int sampleRate, int channels, int frameSizeMS, const std::optional<std::string>& playbackDevice)
     {
         if (alreadyInitialized)
         {
-            ma_context_uninit(context.get());
             ma_device_stop(device.get());
             ma_device_uninit(device.get());
-        }
-
-        context = std::make_shared<ma_context>();
-
-        ma_result contextInitResult = ma_context_init(nullptr, 0, nullptr, context.get());
-
-        if (contextInitResult != MA_SUCCESS)
-        {
-            throw std::runtime_error("Failed to initialize context");
         }
 
         ma_device_config deviceConfig = ma_device_config_init(ma_device_type_playback);
@@ -65,12 +62,12 @@ namespace core
 
             if (audioDevicesMapping == nullptr)
             {
-                throw std::runtime_error("This shouldn't happened audioDevicesMapping should have been initialized");
+                throw std::runtime_error("This shouldn't happened audioDevicesMapping should already have been initialized");
             }
 
             if (!audioDevicesMapping->contains(playbackDevice.value()))
             {
-                throw std::runtime_error("There is no recording device with the name " + playbackDevice.value() + "\n");
+                throw std::runtime_error("There is no playback device with the name " + playbackDevice.value() + "\n");
             }
 
             deviceConfig.playback.pDeviceID = &audioDevicesMapping->at(playbackDevice.value());
@@ -78,6 +75,7 @@ namespace core
 
         deviceConfig.playback.format = ma_format_f32;
         deviceConfig.playback.channels = channels;
+        deviceConfig.playback.shareMode = ma_share_mode_shared;
         deviceConfig.sampleRate = sampleRate;
         deviceConfig.periodSizeInMilliseconds = frameSizeMS;
         deviceConfig.dataCallback = &staticWriteSamples;
@@ -94,7 +92,7 @@ namespace core
 
         if (deviceInitResult != MA_SUCCESS)
         {
-            throw std::runtime_error("Failed to initialize playback device");
+            throw std::runtime_error("Failed to initialize playback device. Error: " + utils::maResultToString(deviceInitResult));
         }
 
         if (alreadyInitialized && isPlaying)
@@ -103,7 +101,7 @@ namespace core
 
             if (deviceStartResult != MA_SUCCESS)
             {
-                throw std::runtime_error("Failed to start device");
+                throw std::runtime_error("Failed to start device. Error: " + utils::maResultToString(deviceStartResult));
             }
         }
 
@@ -126,7 +124,7 @@ namespace core
 
         if (contextGetDevicesResult != MA_SUCCESS)
         {
-            throw std::runtime_error("Failed to call ma_context_get_devices()");
+            throw std::runtime_error("Failed to call ma_context_get_devices(). Error: " + utils::maResultToString(contextGetDevicesResult));
         }
 
         for (int i = 0; i < playbackCount; i++)
@@ -137,7 +135,7 @@ namespace core
 
     void VoicePlayer::addVoiceSource(int id)
     {
-        voiceSources->emplace(id, std::make_shared<VoiceSource>(1, std::shared_ptr<VoicePlayer>(this)));
+        voiceSources->emplace(id, std::make_shared<VoiceSource>(1, this));
     }
 
     void VoicePlayer::removeVoiceSource(int id) const
@@ -179,14 +177,14 @@ namespace core
 
         if (deviceGetNameResultFirst != MA_SUCCESS)
         {
-            throw std::runtime_error("Cannot get device name");
+            throw std::runtime_error("Cannot get device name. Error: " + utils::maResultToString(deviceGetNameResultFirst));
         }
 
         ma_result deviceGetNameResultSecond = ma_device_get_name(device.get(), ma_device_type_playback, deviceName.get(), nameLength + 1, nullptr);
 
         if (deviceGetNameResultSecond != MA_SUCCESS)
         {
-            throw std::runtime_error("Cannot get device name");
+            throw std::runtime_error("Cannot get device name. Error: " + utils::maResultToString(deviceGetNameResultSecond));
         }
 
         return { deviceName.get() };
@@ -205,7 +203,7 @@ namespace core
 
         if (deviceStartResult != MA_SUCCESS)
         {
-            throw std::runtime_error("Failed to start device");
+            throw std::runtime_error("Failed to start device. Error: " + utils::maResultToString(deviceStartResult));
         }
     }
 
@@ -214,5 +212,17 @@ namespace core
         isPlaying = false;
 
         ma_device_stop(device.get());
+    }
+
+    VoicePlayer::~VoicePlayer()
+    {
+        if (device) {
+            ma_device_stop(device.get());
+            ma_device_uninit(device.get());
+        }
+
+        if (context) {
+            ma_context_uninit(context.get());
+        }
     }
 }

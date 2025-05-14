@@ -4,7 +4,7 @@
 
 namespace core
 {
-    VoiceSource::VoiceSource(float volume, std::shared_ptr<VoicePlayer> voicePlayer)
+    VoiceSource::VoiceSource(float volume, VoicePlayer* voicePlayer)
     {
         this->volume = volume;
         this->voicePlayer = voicePlayer;

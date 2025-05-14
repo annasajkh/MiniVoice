@@ -13,7 +13,7 @@ namespace core
     class MINIVOICE_API VoiceSource
     {
     public:
-        VoiceSource(float volume, std::shared_ptr<VoicePlayer> voicePlayer);
+        VoiceSource(float volume, VoicePlayer* voicePlayer);
 
         void enqueueSamples(std::shared_ptr<float[]> samples);
         std::optional<std::shared_ptr<float[]>> dequeueSamples();
@@ -26,7 +26,7 @@ namespace core
         float volume;
 
         std::shared_ptr<std::queue<std::shared_ptr<float[]>>> samplesList = nullptr;
-        std::shared_ptr<VoicePlayer> voicePlayer;
+        VoicePlayer* voicePlayer;
     };
 
 }

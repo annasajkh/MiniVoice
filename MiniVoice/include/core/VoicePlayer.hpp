@@ -35,6 +35,8 @@ namespace core
         void startPlaying();
         void stopPlaying();
 
+        ~VoicePlayer();
+
     private:
         bool alreadyInitialized = false;
         bool isPlaying = false;
